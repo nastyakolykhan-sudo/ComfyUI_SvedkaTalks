@@ -236,60 +236,9 @@ class STImpactMinMax:
 # Display
 # ---------------------------------------------------------------------------
 
-def _text_to_preview_image(text):
-    """
-    Render text as a small PNG in ComfyUI's temp dir.
-    Returns a list[dict] suitable for ui.images.
-    Falls back gracefully if PIL/folder_paths unavailable.
-    """
-    try:
-        import folder_paths, uuid
-        from PIL import Image as PILImage, ImageDraw, ImageFont
-
-        # Layout constants
-        PADDING   = 10
-        FONT_SIZE = 16
-        BG_COLOR  = (30, 30, 30)
-        FG_COLOR  = (220, 220, 220)
-
-        # Try to load a monospace font; fall back to default
-        font = None
-        for name in ("DejaVuSansMono.ttf", "LiberationMono-Regular.ttf", "Courier New.ttf", "cour.ttf"):
-            try:
-                font = ImageFont.truetype(name, FONT_SIZE)
-                break
-            except Exception:
-                pass
-        if font is None:
-            font = ImageFont.load_default()
-
-        lines = text.splitlines() or [""]
-        # Measure
-        dummy = PILImage.new("RGB", (1, 1))
-        draw  = ImageDraw.Draw(dummy)
-        line_h = FONT_SIZE + 4
-        max_w  = max(draw.textlength(l, font=font) for l in lines) if lines else 100
-        img_w  = int(max_w) + PADDING * 2
-        img_h  = line_h * len(lines) + PADDING * 2
-
-        img  = PILImage.new("RGB", (max(img_w, 120), max(img_h, 40)), BG_COLOR)
-        draw = ImageDraw.Draw(img)
-        for i, line in enumerate(lines):
-            draw.text((PADDING, PADDING + i * line_h), line, fill=FG_COLOR, font=font)
-
-        tmp_dir = folder_paths.get_temp_directory()
-        fname   = f"displayany_{uuid.uuid4().hex[:8]}.png"
-        img.save(os.path.join(tmp_dir, fname))
-        return [{"filename": fname, "subfolder": "", "type": "temp"}]
-    except Exception as e:
-        print(f"[DisplayAny] preview image failed: {e}")
-        return []
-
-
 class STDisplayAny:
     """
-    Display any value as a string. Matches DisplayAny interface.
-    Renders text as a preview image (shown below node) — works in all ComfyUI versions.
+    Display any value as a string. Matches cubiq/ComfyUI_essentials DisplayAny exactly.
     """
 
     @classmethod
@@ -297,9 +246,7 @@ class STDisplayAny:
         return {
             "required": {
                 "input": (any_typ, {}),
-            },
-            "optional": {
-                "display_mode": (["raw value", "type", "shape"], {"default": "raw value"}),
+                "mode": (["raw value", "tensor shape"],),
             }
         }
 
@@ -309,33 +256,23 @@ class STDisplayAny:
     CATEGORY = "SvedkaTalks/Utils"
     OUTPUT_NODE = True
 
-    def run(self, input, display_mode="raw value"):
-        if display_mode == "type":
-            text = str(type(input).__name__)
-        elif display_mode == "shape":
-            if isinstance(input, torch.Tensor):
-                text = str(list(input.shape))
-            elif isinstance(input, (list, tuple)):
-                text = f"[{', '.join(str(x) for x in input[:8])}{'...' if len(input) > 8 else ''}]  len={len(input)}"
-            else:
-                text = str(type(input).__name__)
-        else:
-            if isinstance(input, torch.Tensor):
-                if input.numel() == 1:
-                    text = str(input.item())
-                elif input.numel() <= 8:
-                    text = str(input.tolist())
-                else:
-                    text = f"Tensor{list(input.shape)} min={input.min().item():.4g} max={input.max().item():.4g}"
-            elif isinstance(input, (list, tuple)) and len(input) > 0 and isinstance(input[0], (int, float)):
-                preview = input[:8]
-                text = f"[{', '.join(f'{v:.4g}' for v in preview)}{'...' if len(input) > 8 else ''}]  len={len(input)}"
-            else:
-                text = str(input)
+    def run(self, input, mode="raw value"):
+        if mode == "tensor shape":
+            text = []
+            def tensorShape(tensor):
+                if isinstance(tensor, dict):
+                    for k in tensor:
+                        tensorShape(tensor[k])
+                elif isinstance(tensor, list):
+                    for i in range(len(tensor)):
+                        tensorShape(tensor[i])
+                elif hasattr(tensor, 'shape'):
+                    text.append(list(tensor.shape))
+            tensorShape(input)
+            input = text
 
-        print(f"[DisplayAny] {text}")
-        images = _text_to_preview_image(text)
-        return {"ui": {"images": images, "text": [text]}, "result": (text,)}
+        text = str(input)
+        return {"ui": {"text": text}, "result": (text,)}
 
 
 # ---------------------------------------------------------------------------
