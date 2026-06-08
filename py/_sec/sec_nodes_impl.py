@@ -91,11 +91,19 @@ def apply_fp8_weight_only_quantization(model, precision_str):
     return False
 
 
+SEC_HF_REPO = "OpenIXCLab/SeC-4B"
+
 def get_repo_config_path():
-    """Get path to model config files stored in the repo."""
+    """
+    Get path to model config files.
+    Returns the local model_config dir if it exists and has a config.json,
+    otherwise returns the HuggingFace repo ID as fallback.
+    """
     repo_root = Path(__file__).parent
     config_dir = repo_root / "model_config"
-    return str(config_dir)
+    if config_dir.is_dir() and (config_dir / "config.json").is_file():
+        return config_dir  # Path object — bypasses HF string validator
+    return SEC_HF_REPO   # fall back to HF hub
 
 
 def get_available_sec_models():
@@ -294,7 +302,8 @@ class SeCModelLoader:
         hydra_overrides_extra.append(f"++model.non_overlap_masks={overlap_value}")
 
         try:
-            config = SeCConfig.from_pretrained(config_path, local_files_only=True)
+            _cfg_arg = config_path if isinstance(config_path, str) else Path(config_path)
+            config = SeCConfig.from_pretrained(_cfg_arg)
             config.hydra_overrides_extra = hydra_overrides_extra
 
             if device.startswith("cuda:"):
@@ -362,7 +371,8 @@ class SeCModelLoader:
 
                 model = SeCModel.from_pretrained(model_path, **load_kwargs).eval()
 
-            tokenizer = AutoTokenizer.from_pretrained(config_path, trust_remote_code=True)
+            _tok_arg = config_path if isinstance(config_path, str) else Path(config_path)
+            tokenizer = AutoTokenizer.from_pretrained(_tok_arg, trust_remote_code=True)
             model.preparing_for_generation(tokenizer=tokenizer, torch_dtype=torch_dtype)
 
             if device.startswith("cuda") and torch_dtype != torch.float32:
@@ -836,7 +846,8 @@ class SeCVideoSegmentation:
             # Recreate config fresh to avoid any stored state issues
             # Use config_path which points to repo config for single files
             from .inference.configuration_sec import SeCConfig
-            config = SeCConfig.from_pretrained(config_path, local_files_only=True)
+            _cfg_arg = config_path if isinstance(config_path, str) else Path(config_path)
+            config = SeCConfig.from_pretrained(_cfg_arg)
             config.hydra_overrides_extra = hydra_overrides_extra
 
             # Prepare for loading
@@ -935,7 +946,8 @@ class SeCVideoSegmentation:
                 fresh_model = fresh_model.to(dtype=torch_dtype)
 
             # Set up tokenizer (use config_path for single files)
-            tokenizer = AutoTokenizer.from_pretrained(config_path, trust_remote_code=True)
+            _tok_arg = config_path if isinstance(config_path, str) else Path(config_path)
+            tokenizer = AutoTokenizer.from_pretrained(_tok_arg, trust_remote_code=True)
             fresh_model.preparing_for_generation(tokenizer=tokenizer, torch_dtype=torch_dtype)
 
             # Reinstall dtype conversion hooks if needed
