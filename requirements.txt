@@ -1,0 +1,40 @@
+# ComfyUI_SvedkaTalks — consolidated requirements
+# Install with: pip install -r requirements.txt
+
+# ---- Core (always required) ----
+torch
+numpy
+scipy
+Pillow
+tqdm
+
+# ---- Layer nodes (OuterGlow, GrowMask, etc.) ----
+# blend_modes  — bundled in imagefunc.py BLEND_MODES dict, not needed as standalone
+
+# ---- Audio nodes (AudioFeatureExtractor) ----
+# librosa_replacements.py handles most audio math natively with scipy.
+# Install librosa only if you want the optional real librosa path:
+# librosa
+
+# ---- AudioPad ----
+# torch.nn.functional (bundled with torch)
+
+# ---- SAM3 ----
+# The SAM3 model uses segment-anything-3 which is installed via comfy_env on the server.
+# Required here only if running outside the Modal/comfy_env environment:
+# segment-anything-3
+
+# ---- SeC (Semantic Correspondence) ----
+# SeCModelLoader / SeCVideoSegmentation require the SeC-4B model weights.
+# No extra pip deps beyond torch + transformers:
+transformers>=4.36.0
+
+# ---- ElevenLabs TTS ----
+elevenlabs>=1.0.0
+soundfile
+
+# ---- MaskFix+, MaskPreview+ ----
+# Pure torch + scipy — no extra deps
+
+# ---- VHS nodes (VHS_GetImageCount) ----
+# VHS is a ComfyUI built-in dependency — no extra pip deps needed
