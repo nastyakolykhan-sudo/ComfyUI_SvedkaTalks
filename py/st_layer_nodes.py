@@ -150,12 +150,8 @@ def _process_batch_gpu(b_tensors, l_tensors, masks_tensor,
     layer  = torch.cat(l_tensors, dim=0).to(device)
     mask_list = [m.to(device).unsqueeze(0).unsqueeze(0) for m in masks_tensor]
     blend_fn = _GPU_BLEND_MODES[blend_mode]
-    # Pre-compute glow→light color ramp as a tensor [max_brightness, 3] — reused across frames
-    max_brightness = max(brightness_list) if isinstance(brightness_list, list) else brightness_list
-    t_vals = torch.linspace(0, 1, max_brightness, device=device)              # [B]
     glow_t  = torch.tensor(glow_rgb,  dtype=torch.float32, device=device) / 255.0  # [3]
     light_t = torch.tensor(light_rgb, dtype=torch.float32, device=device) / 255.0  # [3]
-    color_ramp = glow_t + (light_t - glow_t) * t_vals.unsqueeze(1)           # [B, 3]
     results = []
     with torch.no_grad():
         for i in range(N):
@@ -167,10 +163,10 @@ def _process_batch_gpu(b_tensors, l_tensors, masks_tensor,
             blur_factor = _blur / 20.0
             grow = _glow_range
             result = c.clone()
-            step = max_brightness // _brightness  # index step into pre-computed ramp
             for x in range(_brightness):
                 blur_val = grow * blur_factor
-                color = color_ramp[min(x * step, max_brightness - 1)]   # reuse pre-computed color
+                t = x / _brightness                                    # matches original exactly
+                color = glow_t + (light_t - glow_t) * t               # [3]
                 alpha = _expand_mask_gpu(m, grow, blur_val, device)
                 alpha_hw = alpha[0, 0]
                 op = step_value(1, _opacity, _brightness, x) / 100.0
