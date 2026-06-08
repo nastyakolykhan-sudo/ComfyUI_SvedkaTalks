@@ -26,8 +26,12 @@ tqdm
 
 # ---- SeC (Semantic Correspondence) ----
 # SeCModelLoader / SeCVideoSegmentation require the SeC-4B model weights.
-# No extra pip deps beyond torch + transformers:
 transformers>=4.36.0
+peft                      # LoRA support in modeling_sec.py (top-level import, required)
+omegaconf                 # SAM2 yaml config loading in sam2_video_predictor.py
+hydra-core                # SAM2 Hydra config initialization in sam2/__init__.py
+accelerate                # Faster weight loading (optional but recommended)
+opencv-python-headless    # cv2 used in modeling_sec.py (headless = no GUI deps)
 
 # ---- ElevenLabs TTS ----
 elevenlabs>=1.0.0
