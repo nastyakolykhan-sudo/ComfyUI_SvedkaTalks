@@ -115,6 +115,8 @@ class STSeCVideoSegmentation:
             "required": {
                 "model": ("SEC_MODEL", {"tooltip": "SeC model loaded from SeCModelLoader node"}),
                 "frames": ("IMAGE",),
+                "positive_points":    ("STRING", {"default": ""}),
+                "negative_points":    ("STRING", {"default": ""}),
                 "tracking_direction": (["bidirectional", "forward", "backward"],),
                 "annotation_frame_idx": ("INT", {"default": 0, "min": 0, "max": 9999, "step": 1}),
                 "num_objects": ("INT", {"default": 1, "min": 1, "max": 10, "step": 1}),
@@ -124,10 +126,8 @@ class STSeCVideoSegmentation:
                 "allow_new_objects":  ("BOOLEAN", {"default": True}),
             },
             "optional": {
-                "bbox":                ("BBOX",),
-                "input_mask":          ("MASK",),
-                "positive_points":     ("STRING", {"default": ""}),
-                "negative_points":     ("STRING", {"default": ""}),
+                "bbox":       ("BBOX",),
+                "input_mask": ("MASK",),
             }
         }
 

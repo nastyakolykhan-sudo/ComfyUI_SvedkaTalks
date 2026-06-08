@@ -98,11 +98,11 @@ class STAudioFeatureExtractor:
         return {
             "required": {
                 "audio":            ("AUDIO",),
+                "extraction_method": (cls._get_methods(),),
                 "frame_rate":       ("FLOAT", {"default": 30.0, "min": 1.0, "max": 120.0, "step": 0.1}),
                 "frame_count":      ("INT",   {"default": 0,    "min": 0,   "max": 999999}),
-                "width":            ("INT",   {"default": 512,  "min": 64,  "max": 4096, "step": 64}),
-                "height":           ("INT",   {"default": 512,  "min": 64,  "max": 4096, "step": 64}),
-                "extraction_method": (cls._get_methods(),),
+                "width":            ("INT",   {"default": 64,   "min": 64,  "max": 4096, "step": 64}),
+                "height":           ("INT",   {"default": 64,   "min": 64,  "max": 4096, "step": 64}),
             }
         }
 
@@ -111,7 +111,7 @@ class STAudioFeatureExtractor:
     FUNCTION = "run"
     CATEGORY = "SvedkaTalks/Audio"
 
-    def run(self, audio, frame_rate, frame_count, width, height, extraction_method):
+    def run(self, audio, extraction_method, frame_rate, frame_count, width, height):
         AudioFeature = _load_audio_feature()
         if AudioFeature is None:
             raise RuntimeError("[SvedkaTalks] AudioFeature could not be loaded.")
