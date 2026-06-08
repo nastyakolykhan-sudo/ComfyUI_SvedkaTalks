@@ -33,4 +33,6 @@ for filename in sorted(os.listdir(_py_dir)):
 
 print(f"[SvedkaTalks] Loaded {len(NODE_CLASS_MAPPINGS)} node(s).")
 
-__all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]
+WEB_DIRECTORY = "./js"
+
+__all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]

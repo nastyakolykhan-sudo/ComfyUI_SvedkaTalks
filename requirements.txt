@@ -11,7 +11,8 @@ tqdm
 # ---- Layer nodes (OuterGlow, GrowMask, etc.) ----
 # blend_modes  — bundled in imagefunc.py BLEND_MODES dict, not needed as standalone
 
-# ---- Audio nodes (AudioFeatureExtractor) ----
+# ---- Audio nodes (AudioFeatureExtractor, PreviewFeature) ----
+matplotlib                # PreviewFeature — renders per-frame feature chart as image
 # librosa_replacements.py handles most audio math natively with scipy.
 # Install librosa only if you want the optional real librosa path:
 # librosa

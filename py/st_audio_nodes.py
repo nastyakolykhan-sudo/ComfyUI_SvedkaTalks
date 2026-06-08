@@ -186,6 +186,93 @@ class STFeatureToFlexIntParam:
 
 
 # ===========================================================================
+# PreviewFeature
+# ===========================================================================
+
+class STPreviewFeature:
+    """
+    Render a FEATURE's per-frame values as a matplotlib chart.
+    Displays as an image preview below the node. Matches PreviewFeature interface.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "feature": ("FEATURE",),
+            },
+            "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"},
+        }
+
+    RETURN_TYPES = ()
+    FUNCTION = "preview"
+    CATEGORY = "SvedkaTalks/Audio"
+    OUTPUT_NODE = True
+
+    def preview(self, feature, prompt=None, extra_pnginfo=None):
+        import os
+        import random
+        import matplotlib.pyplot as plt
+        from io import BytesIO
+        from PIL import Image as PILImage
+        import folder_paths
+
+        width, height = 960, 540
+        values = [feature.get_value_at_frame(i) for i in range(feature.frame_count)]
+
+        actual_min = min(values)
+        actual_max = max(values)
+
+        plt.figure(figsize=(width / 100, height / 100), dpi=100)
+        plt.style.use('dark_background')
+        plt.plot(values, color='dodgerblue', linewidth=2)
+        plt.xlabel('Frame', color='white', fontsize=14)
+        plt.ylabel('Value', color='white', fontsize=14)
+        plt.grid(True, linestyle='--', alpha=0.3, color='gray')
+        plt.tick_params(axis='both', colors='white', labelsize=12)
+
+        max_ticks = 10
+        step = max(1, len(values) // max_ticks)
+        plt.xticks(range(0, len(values), step), [str(x) for x in range(0, len(values), step)])
+
+        y_range = actual_max - actual_min
+        if y_range == 0:
+            y_range = 1.0
+            pad = 0.1
+        else:
+            pad = 0.05
+        plt.ylim(actual_min - pad * y_range, actual_max + pad * y_range)
+
+        plt.gca().spines['top'].set_visible(False)
+        plt.gca().spines['right'].set_visible(False)
+        plt.gca().spines['bottom'].set_color('white')
+        plt.gca().spines['left'].set_color('white')
+        plt.title(f'Feature: {feature.name}', color='white', fontsize=16)
+        plt.tight_layout(pad=0.5)
+
+        buf = BytesIO()
+        plt.savefig(buf, format='png', facecolor='black', edgecolor='none')
+        buf.seek(0)
+        plt.close()
+
+        img = PILImage.open(buf)
+        img_array = np.array(img)
+        buf.close()
+
+        output_dir = folder_paths.get_temp_directory()
+        prefix = "feature_preview_" + ''.join(random.choice("abcdefghijklmnopqrstuvwxyz") for _ in range(5))
+        full_output_folder, filename, counter, subfolder, _ = folder_paths.get_save_image_path(
+            prefix, output_dir, img_array.shape[1], img_array.shape[0]
+        )
+        file = f"{filename}_{counter:05}_.png"
+        PILImage.fromarray(np.clip(img_array, 0, 255).astype(np.uint8)).save(
+            os.path.join(full_output_folder, file), compress_level=1
+        )
+
+        return {"ui": {"images": [{"filename": file, "subfolder": subfolder, "type": "temp"}]}}
+
+
+# ===========================================================================
 # NODE MAPPINGS
 # ===========================================================================
 
@@ -193,10 +280,12 @@ NODE_CLASS_MAPPINGS = {
     "AudioPad":               STAudioPad,
     "AudioFeatureExtractor":  STAudioFeatureExtractor,
     "FeatureToFlexIntParam":  STFeatureToFlexIntParam,
+    "PreviewFeature":         STPreviewFeature,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "AudioPad":               "ST: AudioPad",
     "AudioFeatureExtractor":  "ST: AudioFeatureExtractor",
     "FeatureToFlexIntParam":  "ST: FeatureToFlexIntParam",
+    "PreviewFeature":         "ST: PreviewFeature",
 }
