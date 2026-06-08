@@ -6,6 +6,7 @@ Replaces: ImpactCompare, ImpactMinMax, FloatConstant, INTConstant,
           CR String To Combo, SimpleMath+, MaskPreview+
 """
 
+import os
 import re
 import torch
 import numpy as np
@@ -238,7 +239,7 @@ class STImpactMinMax:
 class STDisplayAny:
     """
     Display any value as a string. Matches DisplayAny interface.
-    The second widget_value is the displayed text (updated at runtime).
+    Uses ComfyUI's ui.text mechanism — works in 0.24+.
     """
 
     @classmethod
@@ -246,7 +247,9 @@ class STDisplayAny:
         return {
             "required": {
                 "input": (any_typ, {}),
-                "display_mode": (["raw value", "type", "shape"],),
+            },
+            "optional": {
+                "display_mode": (["raw value", "type", "shape"], {"default": "raw value"}),
             }
         }
 
@@ -263,11 +266,22 @@ class STDisplayAny:
             if isinstance(input, torch.Tensor):
                 text = str(list(input.shape))
             elif isinstance(input, (list, tuple)):
-                text = f"len={len(input)}"
+                text = f"[{', '.join(str(x) for x in input[:8])}{'...' if len(input) > 8 else ''}]  len={len(input)}"
             else:
                 text = str(type(input).__name__)
         else:
-            text = str(input)
+            if isinstance(input, torch.Tensor):
+                if input.numel() == 1:
+                    text = str(input.item())
+                elif input.numel() <= 8:
+                    text = str(input.tolist())
+                else:
+                    text = f"Tensor{list(input.shape)} min={input.min().item():.4g} max={input.max().item():.4g}"
+            elif isinstance(input, (list, tuple)) and len(input) > 0 and isinstance(input[0], (int, float)):
+                preview = input[:8]
+                text = f"[{', '.join(f'{v:.4g}' for v in preview)}{'...' if len(input) > 8 else ''}]  len={len(input)}"
+            else:
+                text = str(input)
         return {"ui": {"text": [text]}, "result": (text,)}
 
 
@@ -305,6 +319,8 @@ class STCRStringToCombo:
 class STMaskPreviewPlus:
     """
     Preview a MASK (or batch of masks) as images. No outputs. Matches MaskPreview+.
+    Saves each frame to ComfyUI's temp folder and returns filenames for the UI.
+    Only the first frame is shown (same behaviour as Impact Pack MaskPreview+).
     """
 
     @classmethod
@@ -317,14 +333,23 @@ class STMaskPreviewPlus:
     OUTPUT_NODE = True
 
     def run(self, mask):
-        # Convert [N, H, W] mask tensor to list of HWC preview images
+        import folder_paths, uuid
+        from PIL import Image as PILImage
+
         if mask.dim() == 2:
             mask = mask.unsqueeze(0)
-        images = []
+
+        tmp_dir = folder_paths.get_temp_directory()
+        results = []
         for m in mask:
-            rgb = m.unsqueeze(-1).expand(-1, -1, 3)  # [H, W, 3]
-            images.append(rgb.cpu().numpy())
-        return {"ui": {"images": []}, "result": ()}
+            # [H, W] float32 → greyscale PNG
+            arr = (m.cpu().numpy() * 255).clip(0, 255).astype(np.uint8)
+            img = PILImage.fromarray(arr, mode="L").convert("RGB")
+            fname = f"maskpreview_{uuid.uuid4().hex[:8]}.png"
+            img.save(os.path.join(tmp_dir, fname))
+            results.append({"filename": fname, "subfolder": "", "type": "temp"})
+
+        return {"ui": {"images": results}, "result": ()}
 
 
 # ---------------------------------------------------------------------------
