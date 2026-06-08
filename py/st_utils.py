@@ -328,6 +328,86 @@ class STMaskPreviewPlus:
 
 
 # ---------------------------------------------------------------------------
+# ComfySwitchNode
+# ---------------------------------------------------------------------------
+
+class STComfySwitchNode:
+    """
+    Route one of two inputs to the output based on a boolean switch.
+    Matches ComfySwitchNode interface exactly:
+      switch=False → on_false, switch=True → on_true
+    Widget_values in workflow: [switch_bool] — single widget.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "on_false": (any_typ, {}),
+                "on_true":  (any_typ, {}),
+                "switch":   ("BOOLEAN", {"default": False}),
+            }
+        }
+
+    RETURN_TYPES = (any_typ,)
+    RETURN_NAMES = ("output",)
+    FUNCTION = "run"
+    CATEGORY = "SvedkaTalks/Utils"
+
+    def run(self, on_false, on_true, switch):
+        return (on_true if switch else on_false,)
+
+
+# ---------------------------------------------------------------------------
+# CustomCombo
+# ---------------------------------------------------------------------------
+
+class STCustomCombo:
+    """
+    Define a list of options as text (one per line) and select one by index.
+    Outputs the selected string value and its index.
+
+    Matches CustomCombo interface: outputs STRING + INDEX (INT).
+
+    NOTE: The original CustomCombo stored options as extra widget slots
+    (widget_values = [selected, index, opt0, opt1, ...]). This recreation
+    uses two clean widgets instead — options (multiline STRING) and
+    selected_index (INT). Existing workflow nodes will need their options
+    re-entered after loading.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "options": ("STRING", {
+                    "multiline": True,
+                    "default": "first\nmiddle\nlast",
+                    "tooltip": "One option per line. Index 0 = first line.",
+                }),
+                "selected_index": ("INT", {
+                    "default": 0,
+                    "min": 0,
+                    "max": 999,
+                    "step": 1,
+                }),
+            }
+        }
+
+    RETURN_TYPES = ("STRING", "INT",)
+    RETURN_NAMES = ("STRING", "INDEX",)
+    FUNCTION = "run"
+    CATEGORY = "SvedkaTalks/Utils"
+
+    def run(self, options, selected_index):
+        opts = [o.strip() for o in options.splitlines() if o.strip()]
+        if not opts:
+            return ("", 0)
+        idx = max(0, min(selected_index, len(opts) - 1))
+        return (opts[idx], idx)
+
+
+# ---------------------------------------------------------------------------
 # NODE MAPPINGS
 # ---------------------------------------------------------------------------
 
@@ -344,6 +424,8 @@ NODE_CLASS_MAPPINGS = {
     "DisplayAny":         STDisplayAny,
     "CR String To Combo": STCRStringToCombo,
     "MaskPreview+":       STMaskPreviewPlus,
+    "ComfySwitchNode":    STComfySwitchNode,
+    "CustomCombo":        STCustomCombo,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -358,4 +440,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "DisplayAny":         "ST: DisplayAny",
     "CR String To Combo": "ST: CR String To Combo",
     "MaskPreview+":       "ST: MaskPreview+",
+    "ComfySwitchNode":    "ST: ComfySwitchNode",
+    "CustomCombo":        "ST: CustomCombo",
 }
