@@ -150,35 +150,39 @@ def _process_batch_gpu(b_tensors, l_tensors, masks_tensor,
     layer  = torch.cat(l_tensors, dim=0).to(device)
     mask_list = [m.to(device).unsqueeze(0).unsqueeze(0) for m in masks_tensor]
     blend_fn = _GPU_BLEND_MODES[blend_mode]
+    # Pre-compute glow→light color ramp as a tensor [max_brightness, 3] — reused across frames
+    max_brightness = max(brightness_list) if isinstance(brightness_list, list) else brightness_list
+    t_vals = torch.linspace(0, 1, max_brightness, device=device)              # [B]
+    glow_t  = torch.tensor(glow_rgb,  dtype=torch.float32, device=device) / 255.0  # [3]
+    light_t = torch.tensor(light_rgb, dtype=torch.float32, device=device) / 255.0  # [3]
+    color_ramp = glow_t + (light_t - glow_t) * t_vals.unsqueeze(1)           # [B, 3]
     results = []
-    for i in range(N):
-        c = canvas[i]; l = layer[i]; m = mask_list[i]
-        _glow_range = glow_range_list[i] if i < len(glow_range_list) else glow_range_list[-1]
-        _brightness = brightness_list[i] if i < len(brightness_list) else brightness_list[-1]
-        _blur       = blur_list[i]       if i < len(blur_list)       else blur_list[-1]
-        _opacity    = opacity_list[i]    if i < len(opacity_list)    else opacity_list[-1]
-        blur_factor = _blur / 20.0
-        grow = _glow_range
-        result = c.clone()
-        for x in range(_brightness):
-            blur_val = grow * blur_factor
-            t = x / _brightness
-            r = (glow_rgb[0] + (light_rgb[0] - glow_rgb[0]) * t) / 255.0
-            g_c = (glow_rgb[1] + (light_rgb[1] - glow_rgb[1]) * t) / 255.0
-            b_c = (glow_rgb[2] + (light_rgb[2] - glow_rgb[2]) * t) / 255.0
-            color = torch.tensor([r, g_c, b_c], dtype=torch.float32, device=device)
-            alpha = _expand_mask_gpu(m, grow, blur_val, device)
-            alpha_hw = alpha[0, 0]
-            op = step_value(1, _opacity, _brightness, x) / 100.0
-            s = color.view(1, 1, 3).expand_as(result)
-            blended = blend_fn(result, s, op)
-            a = alpha_hw.unsqueeze(-1)
-            result = result * (1 - a) + blended * a
-            grow = grow - int(_glow_range / _brightness)
-        m_hw = mask_list[i][0, 0]
-        a = m_hw.unsqueeze(-1)
-        result = result * (1 - a) + l * a
-        results.append(result.unsqueeze(0).cpu())
+    with torch.no_grad():
+        for i in range(N):
+            c = canvas[i]; l = layer[i]; m = mask_list[i]
+            _glow_range = glow_range_list[i] if i < len(glow_range_list) else glow_range_list[-1]
+            _brightness = brightness_list[i] if i < len(brightness_list) else brightness_list[-1]
+            _blur       = blur_list[i]       if i < len(blur_list)       else blur_list[-1]
+            _opacity    = opacity_list[i]    if i < len(opacity_list)    else opacity_list[-1]
+            blur_factor = _blur / 20.0
+            grow = _glow_range
+            result = c.clone()
+            step = max_brightness // _brightness  # index step into pre-computed ramp
+            for x in range(_brightness):
+                blur_val = grow * blur_factor
+                color = color_ramp[min(x * step, max_brightness - 1)]   # reuse pre-computed color
+                alpha = _expand_mask_gpu(m, grow, blur_val, device)
+                alpha_hw = alpha[0, 0]
+                op = step_value(1, _opacity, _brightness, x) / 100.0
+                s = color.view(1, 1, 3).expand_as(result)
+                blended = blend_fn(result, s, op)
+                a = alpha_hw.unsqueeze(-1)
+                result = result * (1 - a) + blended * a
+                grow = grow - int(_glow_range / _brightness)
+            m_hw = mask_list[i][0, 0]
+            a = m_hw.unsqueeze(-1)
+            result = result * (1 - a) + l * a
+            results.append(result.unsqueeze(0).cpu())
     return results
 
 
@@ -467,17 +471,19 @@ class STMaskToValue:
 
     def mask_to_value(self, mask, min_val, max_val, threshold=0.5):
         if mask.dim() == 2:
-            mask = mask.unsqueeze(0)
-        results_float = []
-        for i in range(mask.shape[0]):
-            frame = mask[i]
-            coverage = (frame > threshold).float().mean().item() if threshold > 0.0 else frame.mean().item()
-            value = min_val + (max_val - min_val) * coverage
-            value = max(min(value, max(min_val, max_val)), min(min_val, max_val))
-            results_float.append(value)
-        if len(results_float) == 1:
-            return (results_float[0], int(round(results_float[0])))
-        return (results_float, [int(round(v)) for v in results_float])
+            mask = mask.unsqueeze(0)                          # [N, H, W]
+        with torch.no_grad():
+            if threshold > 0.0:
+                coverage = (mask > threshold).float().mean(dim=(1, 2))   # [N] — one GPU op
+            else:
+                coverage = mask.mean(dim=(1, 2))                          # [N]
+            values = (min_val + (max_val - min_val) * coverage).clamp(
+                min(min_val, max_val), max(min_val, max_val)
+            )
+        vals = values.tolist()                                # single CPU transfer
+        if len(vals) == 1:
+            return (vals[0], int(round(vals[0])))
+        return (vals, [int(round(v)) for v in vals])
 
 
 # ===========================================================================
@@ -557,20 +563,38 @@ class STGetColorToneV2:
             mask = mask.unsqueeze(0)
 
         n = image.shape[0]
+        H, W = image.shape[1], image.shape[2]
+
+        # Pre-blur all mask frames in one GPU batch if needed
+        blurred_masks = None
+        if mask is not None and blur_mask > 0:
+            m = mask.clone()
+            if invert_mask:
+                m = 1.0 - m
+            if m.dim() == 2:
+                m = m.unsqueeze(0)
+            sigma = blur_mask / 3.0
+            k = max(int(6 * sigma + 1) | 1, 3)
+            coords = torch.arange(k, dtype=torch.float32) - k // 2
+            gauss = torch.exp(-0.5 * (coords / sigma) ** 2)
+            gauss = (gauss / gauss.sum()).to(m.device)
+            mb = m.unsqueeze(1)                               # [N,1,H,W]
+            mb = F.conv2d(mb, gauss.view(1,1,1,k), padding=(0, k//2))
+            mb = F.conv2d(mb, gauss.view(1,1,k,1), padding=(k//2, 0))
+            blurred_masks = mb.squeeze(1).clamp(0, 1)        # [N,H,W]
+
         for i in range(n):
             img_pil = tensor2pil(image[i]).convert("RGB")
 
-            # Resolve mask for this frame
             frame_mask = None
             if mask is not None:
                 m_idx = min(i, mask.shape[0] - 1)
-                m_t = mask[m_idx]
-                if invert_mask:
-                    m_t = 1.0 - m_t
-                if blur_mask > 0:
-                    m_np = m_t.cpu().numpy()
-                    m_np = scipy.ndimage.gaussian_filter(m_np, sigma=blur_mask / 3.0)
-                    m_t = torch.from_numpy(m_np)
+                if blurred_masks is not None:
+                    m_t = blurred_masks[min(i, blurred_masks.shape[0]-1)]
+                else:
+                    m_t = mask[m_idx]
+                    if invert_mask:
+                        m_t = 1.0 - m_t
                 frame_mask = tensor2pil(m_t.unsqueeze(0)).convert("L")
 
             if region == "subject" and frame_mask is not None:
@@ -578,7 +602,7 @@ class STGetColorToneV2:
             elif region == "background" and frame_mask is not None:
                 active_mask = Image.fromarray(255 - np.array(frame_mask))
             else:
-                active_mask = frame_mask  # None for "entire"; or "mask" pass-through
+                active_mask = frame_mask
 
             if method == "average":
                 hex_color = get_image_color_average(img_pil, active_mask)
@@ -587,11 +611,10 @@ class STGetColorToneV2:
 
             hsv = Hex_to_HSV_255level(hex_color)
 
-            # Swatch image
+            # Swatch: create as tensor directly — no PIL roundtrip
             r, g, b = int(hex_color[1:3], 16), int(hex_color[3:5], 16), int(hex_color[5:7], 16)
-            W, H = img_pil.size
-            swatch = Image.new("RGB", (W, H), (r, g, b))
-            ret_images.append(pil2tensor(swatch))
+            swatch = torch.tensor([r/255.0, g/255.0, b/255.0]).view(1, 1, 3).expand(H, W, 3).unsqueeze(0)
+            ret_images.append(swatch)
             ret_hex.append(hex_color)
             ret_hsv.append(hsv)
 

@@ -162,32 +162,27 @@ class STFeatureToFlexIntParam:
 
     def run(self, feature, lower_threshold, upper_threshold, invert_output):
         n = feature.frame_count
-        values = [feature.get_value_at_frame(i) for i in range(n)]
+        values = np.array([feature.get_value_at_frame(i) for i in range(n)], dtype=np.float64)
 
-        lo_list = lower_threshold if isinstance(lower_threshold, (list, tuple)) else [lower_threshold] * n
-        hi_list = upper_threshold if isinstance(upper_threshold, (list, tuple)) else [upper_threshold] * n
+        lo = np.array(lower_threshold if isinstance(lower_threshold, (list, tuple)) else [lower_threshold] * n, dtype=np.float64)
+        hi = np.array(upper_threshold if isinstance(upper_threshold, (list, tuple)) else [upper_threshold] * n, dtype=np.float64)
+        # Pad/trim to length n
+        if len(lo) < n: lo = np.pad(lo, (0, n - len(lo)), mode='edge')
+        if len(hi) < n: hi = np.pad(hi, (0, n - len(hi)), mode='edge')
+        lo, hi = lo[:n], hi[:n]
 
-        min_val = getattr(feature, 'min_value', min(values))
-        max_val = getattr(feature, 'max_value', max(values))
+        min_val = getattr(feature, 'min_value', values.min())
+        max_val = getattr(feature, 'max_value', values.max())
 
-        normalized = []
-        for i, v in enumerate(values):
-            lo = lo_list[i] if i < len(lo_list) else lo_list[-1]
-            hi = hi_list[i] if i < len(hi_list) else hi_list[-1]
-            if max_val == min_val:
-                normalized.append(lo)
-            else:
-                normalized.append(lo + (hi - lo) * (v - min_val) / (max_val - min_val))
+        if max_val == min_val:
+            normalized = lo.copy()
+        else:
+            normalized = lo + (hi - lo) * (values - min_val) / (max_val - min_val)
 
         if invert_output:
-            result = []
-            for i, v in enumerate(normalized):
-                lo = lo_list[i] if i < len(lo_list) else lo_list[-1]
-                hi = hi_list[i] if i < len(hi_list) else hi_list[-1]
-                result.append(hi - (v - lo))
-            normalized = result
+            normalized = hi - (normalized - lo)
 
-        return ([int(round(v)) for v in normalized],)
+        return (np.round(normalized).astype(int).tolist(),)
 
 
 # ===========================================================================
