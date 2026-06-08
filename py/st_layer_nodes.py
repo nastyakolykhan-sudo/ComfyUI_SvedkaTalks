@@ -15,6 +15,7 @@ Includes:
 
 import copy
 import torch
+import os
 import torch.nn.functional as F
 import numpy as np
 import scipy.ndimage
@@ -680,24 +681,32 @@ class STMaskFixPlus:
     def run(self, mask, erode, dilate, blur, fill_holes, invert):
         if mask.dim() == 2:
             mask = mask.unsqueeze(0)
-        out = []
-        for m in mask:
-            np_m = m.cpu().numpy().astype(np.float32)
-            if erode > 0:
-                fp = _build_diamond(erode)
-                np_m = scipy.ndimage.grey_erosion(np_m, footprint=fp)
-            if dilate > 0:
-                fp = _build_diamond(dilate)
-                np_m = scipy.ndimage.grey_dilation(np_m, footprint=fp)
-            if blur > 0:
-                np_m = scipy.ndimage.gaussian_filter(np_m, sigma=blur / 3.0)
-            if fill_holes:
-                np_m = scipy.ndimage.binary_fill_holes(np_m > 0.5).astype(np.float32)
+
+        # Pre-build footprints once — same for every frame
+        fp_erode  = _build_diamond(erode)  if erode  > 0 else None
+        fp_dilate = _build_diamond(dilate) if dilate > 0 else None
+        sigma     = blur / 3.0             if blur   > 0 else 0.0
+
+        frames_np = mask.cpu().numpy().astype(np.float32)  # [N, H, W]
+
+        def _process(np_m):
+            if fp_erode  is not None: np_m = scipy.ndimage.grey_erosion(np_m,  footprint=fp_erode)
+            if fp_dilate is not None: np_m = scipy.ndimage.grey_dilation(np_m, footprint=fp_dilate)
+            if sigma > 0:             np_m = scipy.ndimage.gaussian_filter(np_m, sigma=sigma)
+            if fill_holes:            np_m = scipy.ndimage.binary_fill_holes(np_m > 0.5).astype(np.float32)
             np_m = np.clip(np_m, 0.0, 1.0)
-            if invert:
-                np_m = 1.0 - np_m
-            out.append(torch.from_numpy(np_m))
-        return (torch.stack(out, dim=0),)
+            if invert:                np_m = 1.0 - np_m
+            return np_m
+
+        n = frames_np.shape[0]
+        if n == 1:
+            out = [_process(frames_np[0])]
+        else:
+            workers = min(n, (os.cpu_count() or 4))
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                out = list(pool.map(_process, frames_np))
+
+        return (torch.from_numpy(np.stack(out, axis=0)),)
 
 
 # ===========================================================================
