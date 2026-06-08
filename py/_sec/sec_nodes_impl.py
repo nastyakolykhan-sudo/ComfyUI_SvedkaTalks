@@ -319,42 +319,43 @@ class SeCModelLoader:
                     with init_empty_weights():
                         model = SeCModel(config, use_flash_attn=use_flash_attn)
 
+                    # Load to CPU first for dtype conversion (safer than GPU-direct for mixed dtypes)
                     state_dict = load_file(model_path)
 
+                    # FP8 → FP16 conversion before placing on device
                     if precision_str == "fp8":
-                        converted_state_dict = {}
-                        for key, tensor in state_dict.items():
-                            if tensor.dtype == torch.float8_e4m3fn:
-                                converted_state_dict[key] = tensor.to(torch.float16)
-                            else:
-                                converted_state_dict[key] = tensor
-                        state_dict = converted_state_dict
+                        state_dict = {
+                            k: v.to(torch.float16) if v.dtype == torch.float8_e4m3fn else v
+                            for k, v in state_dict.items()
+                        }
 
+                    # Convert dtype and move to target device in one pass — avoids a second
+                    # full-model copy that .to(device, dtype) would otherwise do.
+                    target_device = device if device.startswith("cuda:") else "cpu"
                     for name, param in state_dict.items():
-                        set_module_tensor_to_device(model, name, device='cpu', value=param)
+                        val = param.to(dtype=torch_dtype) if param.is_floating_point() else param
+                        set_module_tensor_to_device(model, name, device=target_device, value=val)
+                    del state_dict  # free CPU RAM immediately
 
                     model = model.eval()
 
                 except (ImportError, RuntimeError) as e:
+                    # Fallback: standard load without accelerate
                     model = SeCModel(config, use_flash_attn=use_flash_attn)
                     state_dict = load_file(model_path)
 
                     if precision_str == "fp8":
-                        converted_state_dict = {}
-                        for key, tensor in state_dict.items():
-                            if tensor.dtype == torch.float8_e4m3fn:
-                                converted_state_dict[key] = tensor.to(torch.float16)
-                            else:
-                                converted_state_dict[key] = tensor
-                        state_dict = converted_state_dict
+                        state_dict = {
+                            k: v.to(torch.float16) if v.dtype == torch.float8_e4m3fn else v
+                            for k, v in state_dict.items()
+                        }
 
                     model.load_state_dict(state_dict, strict=True)
+                    del state_dict
                     model = model.eval()
-
-                if device.startswith("cuda:"):
-                    model = model.to(device=device, dtype=torch_dtype)
-                else:
-                    model = model.to(device="cpu", dtype=torch_dtype)
+                    # Fallback still needs explicit move
+                    target_device = device if device.startswith("cuda:") else "cpu"
+                    model = model.to(device=target_device, dtype=torch_dtype)
 
             else:
                 load_kwargs = {
@@ -870,59 +871,45 @@ class SeCVideoSegmentation:
 
             # Load model based on format
             if is_single_file:
-                # Manual instantiation for single-file models
-                # Use init_empty_weights to avoid initializing 4B parameters (saves ~30s)
                 try:
                     from accelerate import init_empty_weights
                     from accelerate.utils import set_module_tensor_to_device
 
-                    # Step 1: Create model structure without initializing parameters
                     with init_empty_weights():
                         fresh_model = SeCModel(config, use_flash_attn=use_flash_attn)
 
-                    # Step 2: Load state dict (fast since model has no actual tensors yet)
                     state_dict = load_file(model_path)
 
-                    # Convert FP8 weights to FP16 if needed (same as initial load)
                     if precision_str == "fp8":
-                        converted_state_dict = {}
-                        for key, tensor in state_dict.items():
-                            if tensor.dtype == torch.float8_e4m3fn:
-                                converted_state_dict[key] = tensor.to(torch.float16)
-                            else:
-                                converted_state_dict[key] = tensor
-                        state_dict = converted_state_dict
+                        state_dict = {
+                            k: v.to(torch.float16) if v.dtype == torch.float8_e4m3fn else v
+                            for k, v in state_dict.items()
+                        }
 
-                    # Step 3: Manually assign each tensor to the model on CPU
-                    # This properly initializes buffers and other state
+                    # Convert dtype + place on target device in one pass (no extra .to() needed)
+                    target_device = device if device.startswith("cuda:") else "cpu"
                     for name, param in state_dict.items():
-                        set_module_tensor_to_device(fresh_model, name, device='cpu', value=param)
+                        val = param.to(dtype=torch_dtype) if param.is_floating_point() else param
+                        set_module_tensor_to_device(fresh_model, name, device=target_device, value=val)
+                    del state_dict
 
                     fresh_model = fresh_model.eval()
 
                 except (ImportError, RuntimeError) as e:
-                    # Fallback to standard loading if accelerate not available
                     fresh_model = SeCModel(config, use_flash_attn=use_flash_attn)
                     state_dict = load_file(model_path)
 
-                    # Convert FP8 weights to FP16 if needed (same as initial load)
                     if precision_str == "fp8":
-                        converted_state_dict = {}
-                        for key, tensor in state_dict.items():
-                            if tensor.dtype == torch.float8_e4m3fn:
-                                converted_state_dict[key] = tensor.to(torch.float16)
-                            else:
-                                converted_state_dict[key] = tensor
-                        state_dict = converted_state_dict
+                        state_dict = {
+                            k: v.to(torch.float16) if v.dtype == torch.float8_e4m3fn else v
+                            for k, v in state_dict.items()
+                        }
 
                     fresh_model.load_state_dict(state_dict, strict=True)
+                    del state_dict
                     fresh_model = fresh_model.eval()
-
-                # Move to device and convert dtype
-                if device.startswith("cuda:"):
-                    fresh_model = fresh_model.to(device=device, dtype=torch_dtype)
-                else:
-                    fresh_model = fresh_model.to(device="cpu", dtype=torch_dtype)
+                    target_device = device if device.startswith("cuda:") else "cpu"
+                    fresh_model = fresh_model.to(device=target_device, dtype=torch_dtype)
             else:
                 # Directory-based loading for sharded models
                 load_kwargs = {

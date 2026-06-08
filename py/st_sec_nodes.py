@@ -124,6 +124,10 @@ class STSeCVideoSegmentation:
                 "num_iterations": ("INT", {"default": 12, "min": 1, "max": 50, "step": 1}),
                 "use_point_tracking": ("BOOLEAN", {"default": False}),
                 "allow_new_objects":  ("BOOLEAN", {"default": True}),
+                "keep_model_loaded":  ("BOOLEAN", {
+                    "default": True,
+                    "tooltip": "Keep SeC model in VRAM after segmentation. Recommended on A100 80GB — avoids reloading from disk on every run. Disable only if you need the VRAM for other nodes.",
+                }),
             },
             "optional": {
                 "bbox":       ("BBOX",),
@@ -139,7 +143,8 @@ class STSeCVideoSegmentation:
 
     def segment(self, model, frames, tracking_direction, annotation_frame_idx,
                 num_objects, max_frames, num_iterations, use_point_tracking,
-                allow_new_objects, bbox=None, input_mask=None,
+                allow_new_objects, keep_model_loaded=True,
+                bbox=None, input_mask=None,
                 positive_points="", negative_points=""):
         impl = _load_sec_impl()
         node = impl.SeCVideoSegmentation()
@@ -154,6 +159,7 @@ class STSeCVideoSegmentation:
             negative_points=negative_points,
             max_frames_to_track=max_frames,
             mllm_memory_size=num_iterations,
+            auto_unload_model=(not keep_model_loaded),
         )
 
 
