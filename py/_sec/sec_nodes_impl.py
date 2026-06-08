@@ -294,7 +294,7 @@ class SeCModelLoader:
         hydra_overrides_extra.append(f"++model.non_overlap_masks={overlap_value}")
 
         try:
-            config = SeCConfig.from_pretrained(config_path)
+            config = SeCConfig.from_pretrained(config_path, local_files_only=True)
             config.hydra_overrides_extra = hydra_overrides_extra
 
             if device.startswith("cuda:"):
@@ -836,7 +836,7 @@ class SeCVideoSegmentation:
             # Recreate config fresh to avoid any stored state issues
             # Use config_path which points to repo config for single files
             from .inference.configuration_sec import SeCConfig
-            config = SeCConfig.from_pretrained(config_path)
+            config = SeCConfig.from_pretrained(config_path, local_files_only=True)
             config.hydra_overrides_extra = hydra_overrides_extra
 
             # Prepare for loading
