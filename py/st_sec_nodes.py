@@ -143,7 +143,7 @@ class STSeCVideoSegmentation:
                 positive_points="", negative_points=""):
         impl = _load_sec_impl()
         node = impl.SeCVideoSegmentation()
-        return node.segment(
+        return node.segment_video(
             model=model,
             frames=frames,
             bbox=bbox,
@@ -152,11 +152,8 @@ class STSeCVideoSegmentation:
             annotation_frame_idx=annotation_frame_idx,
             positive_points=positive_points,
             negative_points=negative_points,
-            num_objects=num_objects,
-            max_frames=max_frames,
-            num_iterations=num_iterations,
-            use_point_tracking=use_point_tracking,
-            allow_new_objects=allow_new_objects,
+            max_frames_to_track=max_frames,
+            mllm_memory_size=num_iterations,
         )
 
 
