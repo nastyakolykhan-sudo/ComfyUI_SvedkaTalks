@@ -14,8 +14,8 @@ import numpy as np
 
 
 def _tts_via_requests(text, api_key, voice_id, model_id, stability, similarity_boost,
-                      style, speed, use_speaker_boost, previous_text="", next_text="",
-                      language_code=None):
+                      style, speed, use_speaker_boost, style_prompt="",
+                      previous_text="", next_text="", language_code=None):
     """Call ElevenLabs TTS REST API and return raw audio bytes."""
     import requests
 
@@ -33,9 +33,11 @@ def _tts_via_requests(text, api_key, voice_id, model_id, stability, similarity_b
             "similarity_boost": similarity_boost,
             "style": style,
             "use_speaker_boost": use_speaker_boost,
-            "speed": speed,
         },
+        "speed": speed,
     }
+    if style_prompt and style_prompt.strip():
+        payload["prompt"] = style_prompt.strip()
     if previous_text:
         payload["previous_text"] = previous_text
     if next_text:
@@ -44,7 +46,10 @@ def _tts_via_requests(text, api_key, voice_id, model_id, stability, similarity_b
         payload["language_code"] = language_code
 
     resp = requests.post(url, json=payload, headers=headers, timeout=60)
-    resp.raise_for_status()
+    if not resp.ok:
+        raise RuntimeError(
+            f"[SvedkaTalks] ElevenLabs API error {resp.status_code}: {resp.text}"
+        )
     return resp.content
 
 
@@ -105,7 +110,7 @@ class STElevenlabsTextToSpeech:
     Outputs a ComfyUI AUDIO dict.
 
     Widget order matches the original ElevenlabsTextToSpeech node:
-      text, api_key, voice_id, model_id, style_prompt (unused),
+      text, api_key, voice_id, model_id, style_prompt,
       language, stability, use_speaker_boost, similarity_boost, style, speed
     """
 
@@ -190,6 +195,7 @@ class STElevenlabsTextToSpeech:
             style=style,
             speed=speed,
             use_speaker_boost=use_speaker_boost,
+            style_prompt=style_prompt,
             language_code=lang,
         )
 
